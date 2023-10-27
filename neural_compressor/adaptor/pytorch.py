@@ -3111,6 +3111,7 @@ class PyTorch_IPEXAdaptor(TemplateAdaptor):
                         if not folding:
                             # static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(alpha=0.5)
                             from torch.ao.quantization.observer import MinMaxObserver
+
                             static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(
                                 alpha=0.5, act_observer=MinMaxObserver()
                             )
@@ -3294,6 +3295,7 @@ class PyTorch_IPEXAdaptor(TemplateAdaptor):
         if not hasattr(model._model, "save_qconf_summary") or not hasattr(model._model, "load_qconf_summary"):
             # static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(alpha=0.5)
             from torch.ao.quantization.observer import MinMaxObserver
+
             static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(
                 alpha=0.5, act_observer=MinMaxObserver()
             )
