@@ -13,23 +13,29 @@
 # limitations under the License.
 
 
-class BaseConfig():
-  def __init__(self):
-      self.scope = {}
+class BaseConfig:
+    def __init__(self):
+        self.scope = {}
 
-  def __add__(self, obj):
-      self.scope = {**self.scope, **obj.scope}
+    def __add__(self, obj):
+        self.scope = {**self.scope, **obj.scope}
+
 
 class FP32Config(BaseConfig):
-  def __init__(self, scope):
-      super().__init__()
-      self.scope = {'fp32': scope}
+    def __init__(self, scope):
+        super().__init__()
+        self.scope = {"fp32": scope}
+
 
 class FP8QuantConfig(BaseConfig):
-  def __init__(self, scheme, scope):
-      super().__init__()
-      assert(scheme in ['fp8_e4m3', 'fp8_e3m4', 'fp8_e5m2']), "The FP8 configuration is wrong! Please double check."
-      self.scope = {scheme: scope}
+    def __init__(self, scheme, scope):
+        super().__init__()
+        assert scheme in [
+            "fp8_e4m3",
+            "fp8_e3m4",
+            "fp8_e5m2",
+        ], "The FP8 configuration is wrong! Please double check."
+        self.scope = {scheme: scope}
 
 
 from neural_compressor.common.constant import MAX_TRIALS_EACH_SAMPLER
@@ -108,7 +114,14 @@ class TuningCriterion:
         )
     """
 
-    def __init__(self, strategy="basic", strategy_kwargs=None, timeout=0, max_trials=100, objective="performance"):
+    def __init__(
+        self,
+        strategy="basic",
+        strategy_kwargs=None,
+        timeout=0,
+        max_trials=100,
+        objective="performance",
+    ):
         """Init a TuningCriterion object."""
         self.strategy = strategy
         self.timeout = timeout
@@ -142,7 +155,9 @@ class AccuracyCriterion:
         )
     """
 
-    def __init__(self, higher_is_better=True, criterion="relative", tolerable_loss=0.01):
+    def __init__(
+        self, higher_is_better=True, criterion="relative", tolerable_loss=0.01
+    ):
         """Init an AccuracyCriterion object."""
         self.higher_is_better = higher_is_better
         self.criterion = criterion
@@ -160,7 +175,7 @@ accuracy_criterion = AccuracyCriterion()
 """
        user_model --.
                      \
-user_sq_config -- [adaptor] -> per_op_sq_config  -> [tuner] -> tuner expand it and pass each combination to [adaptor] 
+user_sq_config -- [adaptor] -> per_op_sq_config  -> [tuner] -> tuner expand it and pass each combination to [adaptor]
                                                        ^                         |
                                                        |                         |
                                                        |           adaptor apply the specific config
@@ -169,7 +184,7 @@ user_sq_config -- [adaptor] -> per_op_sq_config  -> [tuner] -> tuner expand it a
 """
 
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, List, Type, Union
@@ -185,6 +200,18 @@ class Priority(Enum):
     LOW = 1
     MEDIUM = 1000
     HIGH = 1000_000
+
+
+all_registered_algo_cap = {}
+all_registered_algo_config = {}
+
+
+def register_algorithm():
+    pass
+
+
+def register_algorithm_config():
+    pass
 
 
 @dataclass
@@ -204,98 +231,25 @@ class Parameter:
     values: Union[Any, List[Any]]
 
 
-class AlgorithmConfig(ABC):
-    """The base class for Algorithm.
-    
-    Example usage::
-        #############################
-        #####  End User Usage #######
-        #############################
+@dataclass
+class Options:
+    default_options: Parameter = None
+    check_func_lst: Union[Callable, List[Callable]] = None
 
-        from neural_compressor.torch.quantization import get_default_sq_config, quantize
 
-        sq_config = get_default_sq_config(backend="ipex")
-        ##############################################################################
-        # Demonstrate how does the user modify the config
-        
-        # User can increase priority to try SQ tuning first.
-        sq_config.priority = 1_000_000
+@dataclass
+class AlgorithmConfig:
+    # the list of operator that this algorithm can be applied. Defaults to None.
+    white_lst: Union[str, List[str], None] = None
+    # the list of operator that this algorithm can't be applied. Defaults to None.
+    black_lst: Union[str, List[str], None] = None
 
-        # User can customize the alpha list.
-        from neural_compressor.common import Parameter
-        sq_config.alpha = Parameter('alpha', [0.1, 0.9])
 
-        # User can also assign a new expand func
-        def new_expand_func():
-            return None
-        sq_config.expand_config = new_expand_func
+class AlgorithmCap(ABC):
+    def __init__(self) -> None:
+        pass
 
-        # User can add filter functions for expand func.
-        def new_filter_func(config):
-            if config.folding and config.alpha < 0.1:
-                return False
-
-        sq_config.add_constrains(new_filter_func)
-
-        # The above code is only for the user wants to modify the config
-        ##############################################################################
-
-        # quantize model
-        model_fp = UserModel()
-        q_model = quantize(model_fp, config=sq_config)
-    """
-
-    def __init__(
-        self,
-        params_lst: Union[Parameter, List[Parameter], None] = None,
-        white_lst: Union[str, List[str], None] = None,
-        black_lst: Union[str, List[str], None] = None,
-        priority: Union[int, float, None] = 0,
-        constraint_func_lst: Union[List[Callable], None] = None,
-    ):
-        """The base class for algorithm configuration.
-
-        Args:
-            params_lst: the tunable parameter list. Defaults to None.
-            white_lst: the list of operator that this algorithm can be applied. Defaults to None.
-            black_lst: the list of operator that this algorithm can't be applied. Defaults to None.
-            priority: the priority of this algorithm when tuning. Defaults to 0.
-            constraint_func_lst: A list of constraint functions used to filter some invalid combinations when expanding.
-                Defaults to None.
-        """
-        self.params_lst = params_lst
-        self.white_lst = white_lst
-        self.black_lst = black_lst
-        self.priority = priority
-        self.constraint_func_lst = constraint_func_lst
-        self._parameters = dict()
-        self._post_init()
-
-    def _post_init(self):
-        if self.params_lst is not None:
-            for param in self.params_lst:
-                self.register_parameter(param.name, param.values)
-
-    def __setattr__(self, name, value):
-        """
-        Examples:
-            >>> sq_algo = AlgorithmConfig()
-            >>> sq_algo.alpha = Parameter('alpha', [0.2, 0.3])
-        """
-        if isinstance(value, Parameter):
-            self.register_parameter(name, value)
-
-    def register_parameter(self, name, value) -> None:
-        """Register tunable parameters.
-
-        Args:
-            name: parameter name
-            value: parameter values.
-        """
-        self._parameters[name] = value
-
-    @abstractmethod
-    def expand_config(self, model):
+    def expand(self, model_info):
         """Generates a set of valid configurations to specify the behavior of **each operation**.
 
         The content of each configuration should includes:
@@ -308,50 +262,21 @@ class AlgorithmConfig(ABC):
         This function expand all valid combinations for tunable params.
         This function was called by tuner to search the best config.
         """
-        raise NotImplementedError
+        pass
+        # TODO(Yi) implement the general expand, framework can override it if needed.
 
-    @abstractmethod
     def merge(
-        self, user_config: Type["AlgorithmConfig"], model=None
-    ) -> Type["AlgorithmConfig"]:
+        self, user_config: Type["AlgorithmConfig"], model_info=None
+    ) -> Type["AlgorithmCap"]:
         """Merge the options of tunable params according to user config, kernel config and user model.
 
         The different algo config may have different `merge` method.
           user config  -.
-           user model   ----> tuning space for this algorithm
+           user model    ----> tuning space for this algorithm
         kernel config  -'
         """
-        raise NotImplementedError
-
-    @classmethod
-    @abstractmethod
-    def get_default_config(cls):
-        """Construct the kernel/algorithm capability and scope.
-
-        The Function includes:
-            - tunable parameters, like quantization scheme, optimization level, and so on.
-            - The scope to which operators can be applied.
-
-        Note: The functionality is similar to the framework YAML in INC 2.0.
-
-        Raises:
-            NotImplementedError: framework should implement it.
-        """
-        raise NotImplementedError
-
-    def add_constraints(
-        self, constraint_func: Union[Callable, List[Callable], None] = None
-    ):
-        """Add constraint functions to filter some invalid combinations.
-
-        Args:
-            constraint_func: constraint function. Defaults to None.
-        """
-        if constraint_func is not None:
-            if isinstance(constraint_func, list):
-                self.constraint_func_lst.extend(constraint_func)
-            else:
-                self.constraint_func_lst.append(constraint_func)
+        # TODO(Yi) implement the general merge, framework can override it if needed.
+        pass
 
 
 ########################################################

@@ -5,17 +5,15 @@ from typing import List, Union
 from torch.nn import Module
 
 from neural_compressor.common import AlgorithmConfig, Tuner
-from neural_compressor.common.utility import to_list
 
 
 def _merge_user_configs_with_default_configs(
     user_configs: Union[AlgorithmConfig, List[AlgorithmConfig]]
 ):
-    user_configs = to_list(user_configs)
+    framework_cap_lst = get_all_cap_of_fwk()
     merged_configs = []
-    for user_config in user_configs:
-        default_config = user_config.get_default_config()
-        merged_configs.append(default_config.merge(user_config))
+    for framework_cap in framework_cap_lst:
+        merged_configs.append(framework_cap.merge(user_configs))
     return merged_configs
 
 

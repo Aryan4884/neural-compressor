@@ -1,79 +1,102 @@
-from typing import Callable, List, Optional, Type, Union
+from enum import Enum, auto
+from typing import Union
 
 import torch
 from torch.nn import Module
 
-from neural_compressor.common.config import AlgorithmConfig, Parameter, Priority
+from neural_compressor.common.config import (
+    AlgorithmCap,
+    AlgorithmConfig,
+    Options,
+    Priority,
+    register_algorithm,
+    register_algorithm_config,
+)
+
+
+class DataType(Enum):
+    FP8 = auto()
+    INT8 = auto()
+    FP32 = auto()
+    BF16 = auto()
+
 
 STR_OR_MODULE = Union[str, Module]
 
 
+@register_algorithm_config(algo_name="smooth_quant")
+@dataclass
 class SmoothQuantConfig(AlgorithmConfig):
     def __init__(
         self,
-        params_lst: List[Parameter] = None,
-        white_lst: Union[STR_OR_MODULE, List[STR_OR_MODULE]] = None,
-        black_lst: Union[STR_OR_MODULE, List[STR_OR_MODULE]] = None,
-        priority: Union[int, float] = Priority.HIGH,
-        constraint_func_lst: Union[List[Callable], None] = None,
+        dtype=[DataType.FP8, DataType.INT8],
+        alpha=[0.5],
+        folding=[True, False],
+        white_lst=[torch.nn.Linear, torch.nn.Conv2d],
+        black_lst=None,
     ):
-        """The smooth quant algorithm configuration class.
+        super().__init__(white_lst, black_lst)
+        self.dtype = dtype
+        self.alpha = alpha
+        self.folding = folding
 
-        Args:
-            params_lst: the tunable parameter list of smooth quant algorithm. Defaults to None.
-            white_lst: the list of operator that the smooth quant can be applied. Defaults to None.
-            black_lst: the list of operator that the smooth quant  can't be applied. Defaults to None.
-            priority: the priority of the smooth quant when tuning. Defaults to HIGH.
-            constraint_func_lst: A list of constraint functions used to filter some invalid combinations when expanding.
-                Defaults to None.
-        """
-        super().__init__(
-            params_lst, white_lst, black_lst, priority, constraint_func_lst
+
+@register_algorithm(algo_name="smooth_quant")
+class SmoothQuantCap(AlgorithmCap):
+    """Register the tunable parameters and scope for smooth quant."""
+
+    def __init__(self) -> None:
+        self.dtype: Options = Options(
+            default_options=[DataType.FP8, DataType.INT8],
+            check_func_lst=lambda x: x in [DataType.FP8, DataType.INT8],
         )
-
-    def expand_config(self, model):
-        # TODO(Xin) implement it
-        pass
-
-    def merge(
-        self, user_config: Type["SmoothQuantConfig"]
-    ) -> Type["SmoothQuantConfig"]:
-        # TODO(Xin) implement it
-        pass
-
-    @classmethod
-    def get_default_config(cls, backend=None):
-        """Construct the tunable parameters and scope for smooth quant.
-
-        Tunable parameters:
-            - folding: True or False
-            - alpha: a float point or a list of float point
-            - white_lst: Linear module and Conv2d module
-
-        Args:
-            backend: `default` or `ipex`. Defaults to None.
-
-        Returns:
-            The instance of SmoothQuantConfig.
-        """
-        if backend is None:
-            import numpy as np
-
-            sq_alpha = Parameter("alpha", np.arange(0.1, 0.5, 0.1).tolist())
-            sq_folding = Parameter("folding", [True, False])
-            default_sq_config = SmoothQuantConfig(
-                [sq_alpha, sq_folding], white_lst=[torch.nn.Linear, torch.nn.Conv2d]
-            )
-            return default_sq_config
+        self.alpha: Options = Options(
+            default_options=[0.5], check_func_lst=[lambda x: 0 < x and x < 1]
+        )
+        self.alpha: Options = Options(
+            default_options=[True, False], check_func_lst=lambda x: isinstance(x, bool)
+        )
+        self.white_lst: Options = Options(
+            default_options=[torch.nn.Linear, torch.nn.Conv2d],
+            check_func_lst=lambda x: isinstance(x, torch.nn.Module),
+        )
+        self.priority = Priority.HIGH
 
 
-def get_default_sq_config(backend: Optional[str] = None):
-    """Get the default smooth quant config.
+def get_default_sq_config(backend="default"):
+    """Return the default smooth quant config to user.
 
     Args:
-        backend: the backend. Defaults to None.
+        backend: the backend, 'default' or 'ipex'. Defaults to 'default'.
 
     Returns:
-        Return the default smooth quant config
+        return the default smooth quant config according to the backend.
     """
-    return SmoothQuantConfig.get_default_config(backend)
+    if backend == "default":
+        default_sq_config = SmoothQuantConfig()
+        return default_sq_config
+
+
+#############################
+#####  End User Usage #######
+#############################
+
+from neural_compressor.torch.quantization import get_default_sq_config, quantize
+
+sq_config = get_default_sq_config(backend="ipex")
+
+##############################################################################
+# Demonstrate how does the user modify the config
+# User can customize the alpha list
+sq_config.alpha = [0.1, 0.9]
+
+# case 2
+# from neural_compressor.torch.quantization import SmoothQuantConfig
+# sq_config = SmoothQuantConfig(alpha=[0.1, 0.9])
+
+# The above code is only for the user wants to modify the config
+##############################################################################
+
+# quantize model
+model_fp = UserModel()
+q_model = quantize(model_fp, config=sq_config)
