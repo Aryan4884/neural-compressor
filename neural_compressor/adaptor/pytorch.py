@@ -2855,7 +2855,7 @@ class PyTorch_IPEXAdaptor(TemplateAdaptor):
             output_data, header="Mixed Precision Statistics", field_names=["Op Type", "Total", "INT8", "BF16", "FP32"]
         ).print_stat()
 
-    def _cfg_to_qconfig(self, tune_cfg):
+    def _cfg_to_qconfig(self, tune_cfg, smooth_quant=False):
         """Convert tune configure to quantization config for each op.
 
         Args:
@@ -2946,7 +2946,7 @@ class PyTorch_IPEXAdaptor(TemplateAdaptor):
         else:
             op_infos = copy.deepcopy(self.op_infos_from_cfgs)
             self.cfgs = torch_utils.util.check_cfg_and_qconfig(
-                tune_cfg["op"], self.cfgs, op_infos, self.output_tensor_id_op_name
+                tune_cfg["op"], self.cfgs, op_infos, self.output_tensor_id_op_name, smooth_quant
             )
 
             with open(self.ipex_config_path, "w") as write_f:
@@ -3109,7 +3109,11 @@ class PyTorch_IPEXAdaptor(TemplateAdaptor):
                         smooth_quant_args = self.recipes.get("smooth_quant_args", {})
                         folding = smooth_quant_args.get("folding", False)
                         if not folding:
-                            static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(alpha=0.5)
+                            # static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(alpha=0.5)
+                            from torch.ao.quantization.observer import MinMaxObserver
+                            static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(
+                                alpha=0.5, act_observer=MinMaxObserver()
+                            )
                     if self.example_inputs is None:
                         self.example_inputs = get_example_inputs(model, self.q_dataloader)
                     if isinstance(self.example_inputs, dict):
@@ -3264,13 +3268,13 @@ class PyTorch_IPEXAdaptor(TemplateAdaptor):
                 alpha = info["alpha"]
                 absorbed_layer = info["absorbed_layer"]
                 input_minmax = info["input_minmax"]
-                weight_max = info["weight_max"]
+                # for peft model,lora_B weights is 0.
+                eps = torch.finfo(torch.float32).eps
+                weight_max = torch.max(info["weight_max"], info["weight_max"] + eps)
                 abs_input_max = torch.max(torch.abs(input_minmax[0]), torch.abs(input_minmax[1]))
                 input_power = torch.pow(abs_input_max, alpha)
                 weight_power = torch.pow(weight_max, 1 - alpha)
                 scale = torch.clip(input_power / weight_power, min=1e-5)
-                if torch.isnan(scale).any() or torch.isinf(scale).any():
-                    continue  # for peft model,lora_B weights is 0.
                 for op_name in absorbed_layer:
                     module = copy.deepcopy(get_module(q_model._model, op_name))
                     new_module = SQLinearWrapper(module, 1.0 / scale, input_minmax, alpha)
@@ -3288,7 +3292,11 @@ class PyTorch_IPEXAdaptor(TemplateAdaptor):
         # Check save_qconf_summary part is a workaround for IPEX bug.
         # Sometimes the prepared model from get_op_capablitiy loss this attribute
         if not hasattr(model._model, "save_qconf_summary") or not hasattr(model._model, "load_qconf_summary"):
-            static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(alpha=0.5)
+            # static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(alpha=0.5)
+            from torch.ao.quantization.observer import MinMaxObserver
+            static_qconfig = ipex.quantization.get_smooth_quant_qconfig_mapping(
+                alpha=0.5, act_observer=MinMaxObserver()
+            )
             if isinstance(self.example_inputs, dict):
                 model._model = ipex.quantization.prepare(
                     model._model, static_qconfig, example_kwarg_inputs=self.example_inputs, inplace=inplace
@@ -3301,10 +3309,8 @@ class PyTorch_IPEXAdaptor(TemplateAdaptor):
         # TODO: update_sq_scale is used to update observer, should fuse in _cfg_to_qconfig
         from .torch_utils.util import update_sq_scale
 
-        self._cfg_to_qconfig(tune_cfg)
-        update_sq_scale(self.ipex_config_path, smoothquant_scale_info)
+        self._cfg_to_qconfig(tune_cfg, smooth_quant=True)
         model._model.load_qconf_summary(qconf_summary=self.ipex_config_path)
-
         # real calibration for other operators
         try:
             # IPEX may raise an error on the second iteration.
