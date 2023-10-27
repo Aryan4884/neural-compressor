@@ -212,19 +212,17 @@ class AlgorithmConfig(ABC):
         #####  End User Usage #######
         #############################
 
-        from neural_compressor.common import Parameter
         from neural_compressor.torch.quantization import get_default_sq_config, quantize
-        from neural_compressor.torch.quantization.quantize import
-
 
         sq_config = get_default_sq_config(backend="ipex")
         ##############################################################################
         # Demonstrate how does the user modify the config
-
+        
         # User can increase priority to try SQ tuning first.
         sq_config.priority = 1_000_000
 
         # User can customize the alpha list.
+        from neural_compressor.common import Parameter
         sq_config.alpha = Parameter('alpha', [0.1, 0.9])
 
         # User can also assign a new expand func
@@ -232,14 +230,14 @@ class AlgorithmConfig(ABC):
             return None
         sq_config.expand_config = new_expand_func
 
-        # User can add the constrains for expand func.
-        def new_valid_func(config):
+        # User can add filter functions for expand func.
+        def new_filter_func(config):
             if config.folding and config.alpha < 0.1:
                 return False
 
-        sq_config.add_constrains(new_valid_func)
+        sq_config.add_constrains(new_filter_func)
 
-        # The above code is only needed if the user wants to modify the config
+        # The above code is only for the user wants to modify the config
         ##############################################################################
 
         # quantize model

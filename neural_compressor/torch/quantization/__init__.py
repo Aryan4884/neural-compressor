@@ -1,0 +1,1 @@
+from neural_compressor.torch.quantization.config import get_default_sq_config
